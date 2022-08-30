@@ -356,6 +356,15 @@ func onProxyCommandDB(cf *CLIConf) error {
 		}
 	}()
 
+	onNewConnection := func(dbCert *x509.Certificate, lp *alpnproxy.LocalProxy, conn net.Conn) {
+		if time.Now().After(dbCert.NotAfter) {
+			fmt.Fprintln(cf.Stdout())
+			fmt.Fprintln(cf.Stdout(), "Your database session is expired. Please restart the local proxy.")
+			lp.Close()
+			return
+		}
+	}
+
 	proxyOpts, err := prepareLocalProxyOptions(&localProxyConfig{
 		cliConf:          cf,
 		teleportClient:   client,
@@ -364,6 +373,7 @@ func onProxyCommandDB(cf *CLIConf) error {
 		listener:         listener,
 		localProxyTunnel: cf.LocalProxyTunnel,
 		rootClusterName:  rootCluster,
+		onNewConnection:  onNewConnection,
 	})
 	if err != nil {
 		return trace.Wrap(err)
@@ -431,6 +441,7 @@ type localProxyOpts struct {
 	keyFile                 string
 	rootCAs                 *x509.CertPool
 	alpnConnUpgradeRequired bool
+	onNewConnection         alpnproxy.OnNewConnectionFunc
 }
 
 // protocol returns the first protocol or string if configuration doesn't contain any protocols.
@@ -470,6 +481,7 @@ func mkLocalProxy(ctx context.Context, opts localProxyOpts) (*alpnproxy.LocalPro
 		Certs:                   certs,
 		RootCAs:                 opts.rootCAs,
 		ALPNConnUpgradeRequired: opts.alpnConnUpgradeRequired,
+		OnNewConnection:         opts.onNewConnection,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
