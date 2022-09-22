@@ -337,6 +337,7 @@ func ForDiscovery(cfg Config) Config {
 		{Kind: types.KindClusterName},
 		{Kind: types.KindNamespace, Name: apidefaults.Namespace},
 		{Kind: types.KindNode},
+		{Kind: types.KindKubernetesCluster},
 	}
 	cfg.QueueSize = defaults.DiscoveryQueueSize
 	return cfg

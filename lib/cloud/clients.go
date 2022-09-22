@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/mysql/armmysql"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresql"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
@@ -100,6 +101,8 @@ type AzureClients interface {
 	GetAzurePostgresClient(subscription string) (azure.DBServersClient, error)
 	// GetAzureSubscriptionClient returns an Azure Subscriptions client
 	GetAzureSubscriptionClient() (*azure.SubscriptionClient, error)
+	// GetAzureKubernetesClient returns an Azure AKS client for the specified subscription.
+	GetAzureKubernetesClient(subscription string) (azure.AKSClient, error)
 }
 
 // NewClients returns a new instance of cloud clients retriever.
@@ -107,8 +110,9 @@ func NewClients() Clients {
 	return &cloudClients{
 		awsSessions: make(map[string]*awssession.Session),
 		azureClients: azureClients{
-			azureMySQLClients:    make(map[string]azure.DBServersClient),
-			azurePostgresClients: make(map[string]azure.DBServersClient),
+			azureMySQLClients:     make(map[string]azure.DBServersClient),
+			azurePostgresClients:  make(map[string]azure.DBServersClient),
+			azureKubernetesClient: make(map[string]azure.AKSClient),
 		},
 	}
 }
@@ -139,6 +143,8 @@ type azureClients struct {
 	azurePostgresClients map[string]azure.DBServersClient
 	// azureSubscriptionsClient is the cached Azure Subscriptions client.
 	azureSubscriptionsClient *azure.SubscriptionClient
+	// azureKubernetesClient is the cached Azure Kubernetes client.
+	azureKubernetesClient map[string]azure.AKSClient
 }
 
 // GetAWSSession returns AWS session for the specified region.
@@ -299,6 +305,17 @@ func (c *cloudClients) GetAzureSubscriptionClient() (*azure.SubscriptionClient, 
 	return c.initAzureSubscriptionsClient()
 }
 
+// GetAzureSubscriptionClient returns an Azure client for listing AKS clusters.
+func (c *cloudClients) GetAzureKubernetesClient(subscription string) (azure.AKSClient, error) {
+	c.mtx.RLock()
+	if client, ok := c.azureKubernetesClient[subscription]; ok {
+		c.mtx.RUnlock()
+		return client, nil
+	}
+	c.mtx.RUnlock()
+	return c.initAzureKubernetesClient(subscription)
+}
+
 // Close closes all initialized clients.
 func (c *cloudClients) Close() (err error) {
 	c.mtx.Lock()
@@ -448,6 +465,30 @@ func (c *cloudClients) initAzureSubscriptionsClient() (*azure.SubscriptionClient
 	return client, nil
 }
 
+func (c *cloudClients) initAzureKubernetesClient(subscription string) (azure.AKSClient, error) {
+	cred, err := c.GetAzureCredential()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if client, ok := c.azureKubernetesClient[subscription]; ok { // If some other thread already got here first.
+		return client, nil
+	}
+	logrus.Debug("Initializing Azure AKS client.")
+	// TODO(tigrato): if/when we support AzureChina/AzureGovernment, we will need to specify the cloud in these options
+	options := &arm.ClientOptions{}
+	api, err := armcontainerservice.NewManagedClustersClient(subscription, cred, options)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	client := azure.NewAKSClustersClient(api, azidentity.NewDefaultAzureCredential)
+	c.azureKubernetesClient[subscription] = client
+	return client, nil
+
+}
+
 // TestCloudClients implements Clients
 var _ Clients = (*TestCloudClients)(nil)
 
@@ -469,6 +510,8 @@ type TestCloudClients struct {
 	AzurePostgres           azure.DBServersClient
 	AzurePostgresPerSub     map[string]azure.DBServersClient
 	AzureSubscriptionClient *azure.SubscriptionClient
+	AzureAKSClientPerSub    map[string]azure.AKSClient
+	AzureAKSClient          azure.AKSClient
 }
 
 // GetAWSSession returns AWS session for the specified region.
@@ -550,6 +593,14 @@ func (c *TestCloudClients) GetAzurePostgresClient(subscription string) (azure.DB
 		return c.AzurePostgresPerSub[subscription], nil
 	}
 	return c.AzurePostgres, nil
+}
+
+// GetAzureKubernetesClient returns an AKS client for the specified subscription
+func (c *TestCloudClients) GetAzureKubernetesClient(subscription string) (azure.AKSClient, error) {
+	if len(c.AzurePostgresPerSub) != 0 {
+		return c.AzureAKSClientPerSub[subscription], nil
+	}
+	return c.AzureAKSClient, nil
 }
 
 // GetAzureSubscriptionClient returns an Azure SubscriptionClient

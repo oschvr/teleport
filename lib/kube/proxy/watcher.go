@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/services"
@@ -46,8 +47,16 @@ func (s *TLSServer) startReconciler(ctx context.Context) (err error) {
 	}
 
 	go func() {
+		// this ticker is used to force reconciliation of resources that the agent
+		// does not have access to.
+		reconcyleTicker := time.NewTicker(2 * time.Minute)
+		defer reconcyleTicker.Stop()
 		for {
 			select {
+			case <-reconcyleTicker.C:
+				if err := s.reconciler.Reconcile(ctx); err != nil {
+					s.log.WithError(err).Error("Failed to reconcile.")
+				}
 			case <-s.reconcileCh:
 				if err := s.reconciler.Reconcile(ctx); err != nil {
 					s.log.WithError(err).Error("Failed to reconcile.")
@@ -162,6 +171,7 @@ func (m *monitoredKubeClusters) get() types.ResourcesWithLabelsMap {
 func (s *TLSServer) registerKubeCluster(ctx context.Context, cluster types.KubeCluster) error {
 	clusterDetails, err := newClusterDetails(
 		ctx,
+		s.CloudClients,
 		cluster,
 		s.log,
 		s.CheckImpersonationPermissions,
@@ -176,6 +186,7 @@ func (s *TLSServer) registerKubeCluster(ctx context.Context, cluster types.KubeC
 func (s *TLSServer) updateKubeCluster(ctx context.Context, cluster types.KubeCluster) error {
 	clusterDetails, err := newClusterDetails(
 		ctx,
+		s.CloudClients,
 		cluster,
 		s.log,
 		s.CheckImpersonationPermissions,

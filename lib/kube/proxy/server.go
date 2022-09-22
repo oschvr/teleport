@@ -27,6 +27,7 @@ import (
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/auth"
+	"github.com/gravitational/teleport/lib/cloud"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/httplib"
 	"github.com/gravitational/teleport/lib/limiter"
@@ -64,6 +65,8 @@ type TLSServerConfig struct {
 	ResourceMatchers []services.ResourceMatcher
 	// OnReconcile is called after each kube_cluster resource reconciliation.
 	OnReconcile func(types.KubeClusters)
+	// CloudClients is a set of cloud clients that Teleport supports.
+	CloudClients cloud.Clients
 }
 
 // CheckAndSetDefaults checks and sets default values
@@ -90,10 +93,12 @@ func (c *TLSServerConfig) CheckAndSetDefaults() error {
 	if c.Log == nil {
 		c.Log = logrus.New()
 	}
+	if c.CloudClients == nil {
+		c.CloudClients = cloud.NewClients()
+	}
 	if c.ConnectedProxyGetter == nil {
 		c.ConnectedProxyGetter = reversetunnel.NewConnectedProxyGetter()
 	}
-
 	return nil
 }
 

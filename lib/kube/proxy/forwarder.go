@@ -278,7 +278,6 @@ func NewForwarder(cfg ForwarderConfig) (*Forwarder, error) {
 			return nil, trace.Wrap(err)
 		}
 	}
-
 	return fwd, nil
 }
 
@@ -1391,7 +1390,7 @@ func (f *Forwarder) setupForwardingHeaders(sess *clusterSession, req *http.Reque
 	// TODO(smallinsky) UPDATE IN 11.0. use KubeTeleportProxyALPNPrefix instead.
 	req.URL.Host = fmt.Sprintf("%s%s", constants.KubeSNIPrefix, constants.APIDomain)
 	if sess.creds != nil {
-		req.URL.Host = sess.creds.targetAddr
+		req.URL.Host = sess.creds.getTargetAddr()
 	}
 
 	// add origin headers so the service consuming the request on the other site
@@ -1599,7 +1598,7 @@ func (f *Forwarder) getDialer(ctx authContext, sess *clusterSession, req *http.R
 type clusterSession struct {
 	authContext
 	parent    *Forwarder
-	creds     *kubeCreds
+	creds     kubeCreds
 	tlsConfig *tls.Config
 	forwarder *forward.Forwarder
 	// noAuditEvents is true if this teleport service should leave audit event
@@ -1778,8 +1777,8 @@ func (f *Forwarder) newClusterSessionLocal(ctx authContext) (*clusterSession, er
 		parent:               f,
 		authContext:          ctx,
 		creds:                details.kubeCreds,
-		kubeClusterEndpoints: []kubeClusterEndpoint{{addr: details.targetAddr}},
-		tlsConfig:            details.tlsConfig.Clone(),
+		kubeClusterEndpoints: []kubeClusterEndpoint{{addr: details.getTargetAddr()}},
+		tlsConfig:            details.getTLSConfig().Clone(),
 	}, nil
 }
 

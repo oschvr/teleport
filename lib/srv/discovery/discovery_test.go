@@ -342,29 +342,16 @@ func TestDiscoveryServer(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			nodeWatcher, err := services.NewNodeWatcher(ctx, services.NodeWatcherConfig{
-				ResourceWatcherConfig: services.ResourceWatcherConfig{
-					Component: "discovery",
-					Client:    client,
-				},
-			})
-			require.NoError(t, err)
-			defer nodeWatcher.Close()
-
-			for !nodeWatcher.IsInitialized() {
-				time.Sleep(100 * time.Millisecond)
-			}
-
 			server, err := New(context.Background(), &Config{
 				Clients: &testClients,
-				Matchers: []services.AWSMatcher{{
+				AWSMatchers: []services.AWSMatcher{{
 					Types:   []string{"EC2"},
 					Regions: []string{"eu-central-1"},
 					Tags:    map[string]utils.Strings{"teleport": {"yes"}},
 					SSM:     &services.AWSSSM{DocumentName: "document"},
 				}},
-				Emitter:     tc.emitter,
-				NodeWatcher: nodeWatcher,
+				Emitter: tc.emitter,
+				Log:     logrus.New(),
 			})
 			require.NoError(t, err)
 
@@ -377,7 +364,6 @@ func TestDiscoveryServer(t *testing.T) {
 				logger := logrus.New()
 				logger.SetOutput(w)
 				logger.SetLevel(logrus.DebugLevel)
-				server.log = logrus.NewEntry(logger)
 			}
 			go server.Start()
 

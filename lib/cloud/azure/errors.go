@@ -17,6 +17,7 @@ limitations under the License.
 package azure
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -28,8 +29,12 @@ import (
 // to trace error. If the provided error is not a `ResponseError` it returns.
 // the error without modifying it.
 func ConvertResponseError(err error) error {
-	responseErr, ok := err.(*azcore.ResponseError)
-	if !ok {
+	if err == nil {
+		return nil
+	}
+
+	var responseErr *azcore.ResponseError
+	if !errors.As(err, &responseErr) {
 		return err
 	}
 
