@@ -7291,7 +7291,8 @@ type KubernetesClusterSpecV3 struct {
 	DynamicLabels map[string]CommandLabelV2 `protobuf:"bytes,1,rep,name=DynamicLabels,proto3" json:"dynamic_labels,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 	// Kubeconfig is the kubeconfig file payload that grants access to the cluster.
 	// If multiple contexts are specified, the first will be selected.
-	Kubeconfig           []byte    `protobuf:"bytes,2,opt,name=Kubeconfig,proto3" json:"kubeconfig,omitempty"`
+	Kubeconfig []byte `protobuf:"bytes,2,opt,name=Kubeconfig,proto3" json:"kubeconfig,omitempty"`
+	// Azure holds the required Azure information for Teleport to access the cluster.
 	Azure                KubeAzure `protobuf:"bytes,3,opt,name=Azure,proto3" json:"azure,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}  `json:"-"`
 	XXX_unrecognized     []byte    `json:"-"`
