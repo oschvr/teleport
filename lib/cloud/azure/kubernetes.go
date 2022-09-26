@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	armazcore "github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
@@ -86,7 +87,11 @@ type ImpersonationPermissionsChecker func(ctx context.Context, clusterName strin
 // azureIdentityFunction is a function signature used to setup azure credentials.
 // This is used to generate special credentials with cluster TentantID to retrieve
 // access tokens.
-type azureIdentityFunction func(options *azidentity.DefaultAzureCredentialOptions) (*azidentity.DefaultAzureCredential, error)
+type azureIdentityFunction func(options *azidentity.DefaultAzureCredentialOptions) (GetToken, error)
+
+type GetToken interface {
+	GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error)
+}
 
 // ClusterCredentialsConfig are the required parameters for generating cluster credentials.
 type ClusterCredentialsConfig struct {
@@ -137,7 +142,10 @@ type aKSClient struct {
 // NewAKSClustersClient returns a client for Azure AKS clusters.
 func NewAKSClustersClient(api ARMAKS, azIdentity azureIdentityFunction) AKSClient {
 	if azIdentity == nil {
-		azIdentity = azidentity.NewDefaultAzureCredential
+		azIdentity = func(options *azidentity.DefaultAzureCredentialOptions) (GetToken, error) {
+			cc, err := azidentity.NewDefaultAzureCredential(options)
+			return cc, err
+		}
 	}
 	return &aKSClient{api: api, azIdentity: azIdentity}
 }
@@ -528,7 +536,6 @@ func (s *AKSCluster) IsAvailable() bool {
 	switch s.Properties.ClusterState {
 	case "Succeeded", "Updating":
 		return true
-		// FIXME: check this available
 	case "Inaccessible", "Dropping", "Disabled":
 		return false
 	default:

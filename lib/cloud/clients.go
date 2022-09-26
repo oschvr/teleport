@@ -483,7 +483,11 @@ func (c *cloudClients) initAzureKubernetesClient(subscription string) (azure.AKS
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	client := azure.NewAKSClustersClient(api, azidentity.NewDefaultAzureCredential)
+	client := azure.NewAKSClustersClient(
+		api, func(options *azidentity.DefaultAzureCredentialOptions) (azure.GetToken, error) {
+			cc, err := azidentity.NewDefaultAzureCredential(options)
+			return cc, err
+		})
 	c.azureKubernetesClient[subscription] = client
 	return client, nil
 
