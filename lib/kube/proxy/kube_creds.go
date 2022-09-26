@@ -57,14 +57,14 @@ func (s *staticKubeCreds) getKubeClient() *kubernetes.Clientset {
 	return s.kubeClient
 }
 
-func (c *staticKubeCreds) wrapTransport(rt http.RoundTripper) (http.RoundTripper, error) {
-	if c == nil {
+func (s *staticKubeCreds) wrapTransport(rt http.RoundTripper) (http.RoundTripper, error) {
+	if s == nil {
 		return rt, nil
 	}
-	return transport.HTTPWrappersForConfig(c.transportConfig, rt)
+	return transport.HTTPWrappersForConfig(s.transportConfig, rt)
 }
 
-func (c *staticKubeCreds) close() error {
+func (s *staticKubeCreds) close() error {
 	return nil
 }
 

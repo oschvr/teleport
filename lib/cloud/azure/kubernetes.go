@@ -83,10 +83,10 @@ var _ ARMAKS = (*armcontainerservice.ManagedClustersClient)(nil)
 type ImpersonationPermissionsChecker func(ctx context.Context, clusterName string,
 	sarClient authztypes.SelfSubjectAccessReviewInterface) error
 
-// AzureIdentityFunction is a function signature used to setup azure credentials.
+// azureIdentityFunction is a function signature used to setup azure credentials.
 // This is used to generate special credentials with cluster TentantID to retrieve
 // access tokens.
-type AzureIdentityFunction func(options *azidentity.DefaultAzureCredentialOptions) (*azidentity.DefaultAzureCredential, error)
+type azureIdentityFunction func(options *azidentity.DefaultAzureCredentialOptions) (*azidentity.DefaultAzureCredential, error)
 
 // ClusterCredentialsConfig are the required parameters for generating cluster credentials.
 type ClusterCredentialsConfig struct {
@@ -131,11 +131,11 @@ type AKSClient interface {
 // aKSClient wraps the ARMAKS API and satisfies AKSClient.
 type aKSClient struct {
 	api        ARMAKS
-	azIdentity AzureIdentityFunction
+	azIdentity azureIdentityFunction
 }
 
 // NewAKSClustersClient returns a client for Azure AKS clusters.
-func NewAKSClustersClient(api ARMAKS, azIdentity AzureIdentityFunction) AKSClient {
+func NewAKSClustersClient(api ARMAKS, azIdentity azureIdentityFunction) AKSClient {
 	if azIdentity == nil {
 		azIdentity = azidentity.NewDefaultAzureCredential
 	}
@@ -220,7 +220,7 @@ func (c *aKSClient) ClusterCredentials(ctx context.Context, cfg ClusterCredentia
 		// the access credentials are static and are only changed if there is a change in the cluster CA, however to prevent this we will refresh the credentials
 		return cfg, time.Now().Add(1 * time.Hour), trace.Wrap(err)
 	default:
-		return nil, time.Time{}, trace.BadParameter("unsuported AKS authentication mode %s", clusterDetails.Properties.AccessConfig)
+		return nil, time.Time{}, trace.BadParameter("unsuported AKS authentication mode %v", clusterDetails.Properties.AccessConfig)
 	}
 
 }
@@ -356,21 +356,24 @@ func (c *aKSClient) getRestConfigFromKubeconfigs(kubes []*armcontainerservice.Cr
 }
 
 // checkAccessPermissions checks if the agent has the required permissions to operate.
-func (a *aKSClient) checkAccessPermissions(ctx context.Context, clientCfg *rest.Config, cluster ClusterCredentialsConfig) error {
+func (c *aKSClient) checkAccessPermissions(ctx context.Context, clientCfg *rest.Config, cfg ClusterCredentialsConfig) error {
 	client, err := kubernetes.NewForConfig(clientCfg)
 	if err != nil {
 		return trace.Wrap(err, "failed to generate Kubernetes client for cluster")
 	}
 	sarClient := client.AuthorizationV1().SelfSubjectAccessReviews()
-	return trace.Wrap(cluster.ImpersonationPermissionsChecker(ctx, cluster.ResourceName, sarClient))
+	return trace.Wrap(cfg.ImpersonationPermissionsChecker(ctx, cfg.ResourceName, sarClient))
 }
 
 // getAzureToken generates an authentication token for clusters with AD enabled.
-func (a *aKSClient) getAzureToken(ctx context.Context, tentantID string, clientCfg *rest.Config) (time.Time, error) {
+func (c *aKSClient) getAzureToken(ctx context.Context, tentantID string, clientCfg *rest.Config) (time.Time, error) {
 	const (
+		// azureManagedClusterScope is a fixed uuid used to inform Azure
+		// that we want a Token fully populated with identity principals.
+		// ref: https://github.com/Azure/kubelogin#exec-plugin-format
 		azureManagedClusterScope = "6dae42f8-4368-4678-94ff-3960e28e3630"
 	)
-	cred, err := a.azIdentity(&azidentity.DefaultAzureCredentialOptions{
+	cred, err := c.azIdentity(&azidentity.DefaultAzureCredentialOptions{
 		TenantID: tentantID,
 	})
 	if err != nil {
@@ -464,7 +467,7 @@ func (c *aKSClient) grantAccessWithCommand(ctx context.Context, resourceGroupNam
 func extractGroupFromAzure(token string) (string, error) {
 	p := jwt.NewParser()
 	claims := &azureGroupClaims{}
-	// We are not intered in validating the token since
+	// We do not want to validate the token since
 	// we generated it from Azure SDK.
 	_, _, err := p.ParseUnverified(token, claims)
 	if err != nil {

@@ -1275,7 +1275,7 @@ func checkStaticConfig(t *testing.T, conf *FileConfig) {
 		PublicAddr: apiutils.Strings{"luna3:22"},
 	}, cmp.AllowUnexported(Service{})))
 
-	require.Empty(t, cmp.Diff(conf.Discovery, Discovery{AWSMatchers: []AWSMatcher{}}, cmp.AllowUnexported(Service{})))
+	require.Empty(t, cmp.Diff(conf.Discovery, Discovery{AWSMatchers: nil}, cmp.AllowUnexported(Service{})))
 
 	require.True(t, conf.Auth.Configured())
 	require.True(t, conf.Auth.Enabled())

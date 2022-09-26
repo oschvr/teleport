@@ -27,7 +27,7 @@ const (
 	Azure = "azure"
 )
 
-// Fetcher defines the common methods accross all fetchers.
+// Fetcher defines the common methods across all fetchers.
 type Fetcher interface {
 	// Get returns the list of resources from the cloud after applying the filters.
 	Get(ctx context.Context) (types.ResourcesWithLabels, error)
