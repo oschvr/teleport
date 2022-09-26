@@ -30,7 +30,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v2"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/gravitational/trace"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -41,28 +40,43 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// AKSAccessConfig defines the authentication method for AKS cluster.
 type AKSAccessConfig uint8
 
 const (
+	// AzureRBAC indicates that the Azure AD is enabled and authorization is handled by Azure RBAC.
 	AzureRBAC AKSAccessConfig = iota
+	// AzureRBAC indicates that the Azure AD is enabled but authorization is handled by Kubernetes RBAC.
 	AzureAD
+	// LocalAccounts indicates that the cluster access happens through Local accounts created
+	// during provisioning phase.
 	LocalAccounts
 )
 
+// AKSCluster represents an AKS cluster
 type AKSCluster struct {
-	Name           string
-	GroupName      string
-	TenantID       string
-	Location       string
+	// Name is the name of the cluster
+	Name string
+	// GroupName is the resource group name.
+	GroupName string
+	// TenantID is the cluster TenantID.
+	TenantID string
+	// Location is the cluster region.
+	Location string
+	// SubscriptionID is the cluster subscription id.
 	SubscriptionID string
-	Tags           map[string]string
-	Properties     AKSClusterProperties
+	// Tags are the cluster tags.
+	Tags map[string]string
+	// Properties are the cluster authentication and authorization properties.
+	Properties AKSClusterProperties
 }
 
+// AKSClusterProperties holds the AZ cluster authentication properties.
 type AKSClusterProperties struct {
-	AccessConfig  AKSAccessConfig
+	// AccessConfig indicates the authentication & authorization config to use with the cluster.
+	AccessConfig AKSAccessConfig
+	// LocalAccounts indicates if the cluster has local accounts.
 	LocalAccounts bool
-	ClusterState  string
 }
 
 // ARMAKS is an interface for armcontainerservice.ManagedClustersClient.
@@ -89,7 +103,9 @@ type ImpersonationPermissionsChecker func(ctx context.Context, clusterName strin
 // access tokens.
 type azureIdentityFunction func(options *azidentity.DefaultAzureCredentialOptions) (GetToken, error)
 
+// GetToken is an interface for generating tokens from credentials.
 type GetToken interface {
+	// GetToken returns an azure token.
 	GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error)
 }
 
@@ -511,40 +527,21 @@ func AKSClusterFromManagedCluster(cluster *armcontainerservice.ManagedCluster) *
 		if cluster.Properties.AADProfile != nil && ptrToVal(cluster.Properties.AADProfile.EnableAzureRBAC) {
 			result.Properties = AKSClusterProperties{
 				AccessConfig: AzureRBAC,
-				ClusterState: stringVal(cluster.Properties.ProvisioningState),
 			}
 		} else if cluster.Properties.AADProfile != nil {
 			result.Properties = AKSClusterProperties{
 				AccessConfig:  AzureAD,
 				LocalAccounts: !ptrToVal(cluster.Properties.DisableLocalAccounts),
-				ClusterState:  stringVal(cluster.Properties.ProvisioningState),
 			}
 		} else {
 			result.Properties = AKSClusterProperties{
 				AccessConfig:  LocalAccounts,
 				LocalAccounts: true,
-				ClusterState:  stringVal(cluster.Properties.ProvisioningState),
 			}
 		}
 
 	}
 	return result
-}
-
-// IsAvailable returns whether the Azure DBServer is available.
-func (s *AKSCluster) IsAvailable() bool {
-	switch s.Properties.ClusterState {
-	case "Succeeded", "Updating":
-		return true
-	case "Inaccessible", "Dropping", "Disabled":
-		return false
-	default:
-		log.Warnf("Unknown cluster state: %q. Assuming Azure AKS cluster %q is available.",
-			s.Properties.ClusterState,
-			s.Name,
-		)
-		return true
-	}
 }
 
 func ptrToVal[T any](s *T) T {

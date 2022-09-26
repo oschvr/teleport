@@ -317,6 +317,5 @@ func (m *ARMKubernetesMock) BeginRunCommand(ctx context.Context, resourceGroupNa
 	if m.NoAuth {
 		return nil, trace.AccessDenied("unauthorized")
 	}
-	panic("chanou")
 	return &runtime.Poller[armcontainerservice.ManagedClustersClientRunCommandResponse]{}, nil
 }
