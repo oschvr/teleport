@@ -49,7 +49,7 @@ func Serve(ctx context.Context, cfg Config) error {
 		return trace.Wrap(err)
 	}
 
-	apiServer, err := apiserver.New(apiserver.Config{
+	apiServer, err := apiserver.New(ctx, apiserver.Config{
 		HostAddr: cfg.Addr,
 		Daemon:   daemonService,
 		CertsDir: cfg.CertsDir,
