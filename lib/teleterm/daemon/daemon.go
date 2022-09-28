@@ -33,9 +33,14 @@ func New(cfg Config) (*Service, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	// TODO: Pass context from above.
+	closeContext, cancel := context.WithCancel(context.Background())
+
 	return &Service{
-		cfg:      &cfg,
-		gateways: make(map[string]*gateway.Gateway),
+		cfg:          &cfg,
+		closeContext: closeContext,
+		cancel:       cancel,
+		gateways:     make(map[string]*gateway.Gateway),
 	}, nil
 }
 
@@ -150,6 +155,19 @@ func (s *Service) createGateway(ctx context.Context, params CreateGatewayParams)
 		LocalPort:             params.LocalPort,
 		CLICommandProvider:    cliCommandProvider,
 		TCPPortAllocator:      s.cfg.TCPPortAllocator,
+		// TODO: Add test that makes sure NewWithLocalPort properly copies OnNewConnection.
+		OnNewConnection: func(gatewayURI uri.ResourceURI, targetURI string) {
+			go func() {
+				_, err := s.tshdEventsClient.NewGatewayConnectionAccepted(s.closeContext,
+					&api.NewGatewayConnectionAcceptedRequest{
+						GatewayUri: gatewayURI.String(),
+						TargetUri:  targetURI,
+					})
+				if err != nil {
+					s.cfg.Log.WithError(err).Warn("Could not notify about new gateway connection")
+				}
+			}()
+		},
 	}
 
 	gateway, err := s.cfg.GatewayCreator.CreateGateway(ctx, clusterCreateGatewayParams)
@@ -374,9 +392,14 @@ func (s *Service) Stop() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	s.cfg.Log.Info("Stopping")
+
 	for _, gateway := range s.gateways {
 		gateway.Close()
 	}
+
+	s.cancel()
+}
 
 // SetTshdEventsClient allows apiserver.APIServer to provide the tshd events client after
 // daemon.Service has been created.
@@ -396,8 +419,10 @@ func (s *Service) SetTshdEventsClient(client api.TshdEventsServiceClient) {
 
 // Service is the daemon service
 type Service struct {
-	cfg *Config
-	mu  sync.RWMutex
+	cfg          *Config
+	mu           sync.RWMutex
+	closeContext context.Context
+	cancel       context.CancelFunc
 	// gateways holds the long-running gateways for resources on different clusters. So far it's been
 	// used mostly for database gateways but it has potential to be used for app access as well.
 	gateways map[string]*gateway.Gateway

@@ -45,6 +45,7 @@ func New(cfg Config) (*Gateway, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	// TODO(ravicious): Pass closeContext from daemon.Service.
 	closeContext, closeCancel := context.WithCancel(context.Background())
 	// make sure the listener is closed if gateway creation failed
 	ok := false
@@ -80,7 +81,7 @@ func New(cfg Config) (*Gateway, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	localProxy, err := alpn.NewLocalProxy(alpn.LocalProxyConfig{
+	localProxyConfig := alpn.LocalProxyConfig{
 		InsecureSkipVerify: cfg.Insecure,
 		RemoteProxyAddr:    cfg.WebProxyAddr,
 		Protocols:          []alpncommon.Protocol{protocol},
@@ -88,7 +89,16 @@ func New(cfg Config) (*Gateway, error) {
 		ParentContext:      closeContext,
 		SNI:                address.Host(),
 		Certs:              []tls.Certificate{tlsCert},
-	})
+	}
+
+	// TODO: Add tests for OnNewConnection.
+	if cfg.OnNewConnection != nil {
+		localProxyConfig.OnNewConnection = func(lp *alpn.LocalProxy, conn net.Conn) {
+			cfg.OnNewConnection(cfg.URI, cfg.TargetURI)
+		}
+	}
+
+	localProxy, err := alpn.NewLocalProxy(localProxyConfig)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
