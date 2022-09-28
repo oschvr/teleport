@@ -63,6 +63,9 @@ type Config struct {
 	// SSH session
 	getHomeDir homeDirRetriever
 
+	// if true a simple progress (e.g. 10%) is written to ProgressWriter (instead of a progressbar)
+	WriteSimpleProgress bool
+
 	// ProgressWriter is a writer for printing the progress
 	// (used only on the client)
 	ProgressWriter io.Writer
@@ -394,8 +397,13 @@ func (c *Config) transferFile(ctx context.Context, dstPath, srcPath string, srcF
 	}
 	// if a progress writer was set, write file transfer progress
 	if c.ProgressWriter != nil {
-		progressBar := newProgressBar(srcFileInfo.Size(), srcFileInfo.Name(), c.ProgressWriter)
-		writer = io.MultiWriter(canceler, dstFile, progressBar)
+		if c.WriteSimpleProgress {
+			progressBar := newSimpleProgressBar(srcFileInfo.Size(), c.ProgressWriter)
+			writer = io.MultiWriter(canceler, dstFile, progressBar)
+		} else {
+			progressBar := newProgressBar(srcFileInfo.Size(), srcFileInfo.Name(), c.ProgressWriter)
+			writer = io.MultiWriter(canceler, dstFile, progressBar)
+		}
 	} else {
 		writer = io.MultiWriter(canceler, dstFile)
 	}
@@ -446,6 +454,32 @@ func (c *cancelWriter) Write(b []byte) (int, error) {
 		return 0, err
 	}
 	return len(b), nil
+}
+
+// TODO: my initial plan was to configure the progressbar to print only only percentage progress
+// however, it doesn't seem to be doable (and maybe it is not the best idea)
+// I will go with other option
+func newSimpleProgressBar(size int64, writer io.Writer) *progressbar.ProgressBar {
+	// this is necessary because progressbar.DefaultBytes doesn't allow
+	// the caller to specify a writer
+
+	return progressbar.NewOptions64(
+		size,
+		//		progressbar.OptionSetDescription(desc),
+		progressbar.OptionSetWriter(writer),
+		//		progressbar.OptionShowBytes(true),
+		//		progressbar.OptionSetWidth(10),
+		progressbar.OptionSetPredictTime(false),
+		progressbar.OptionThrottle(100*time.Millisecond),
+		//		progressbar.OptionShowCount(),
+		progressbar.OptionSetWidth(0),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(writer, "\n")
+		}),
+		//		progressbar.OptionSpinnerType(14),
+		//		progressbar.OptionFullWidth(),
+		//		progressbar.OptionSetRenderBlankState(true),
+	)
 }
 
 // newProgressBar returns a new progress bar that writes to writer.

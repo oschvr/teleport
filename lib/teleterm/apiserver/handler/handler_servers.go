@@ -39,6 +39,14 @@ func (s *Handler) ListServers(ctx context.Context, req *api.ListServersRequest) 
 	return response, nil
 }
 
+func (s *Handler) TransferFile(request *api.FileTransferRequest, server api.TerminalService_TransferFileServer) error {
+	err := s.DaemonService.TransferFile(request, server)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
 func newAPIServer(server clusters.Server) *api.Server {
 	apiLabels := APILabels{}
 	serverLabels := server.GetStaticLabels()

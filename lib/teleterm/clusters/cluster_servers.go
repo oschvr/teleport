@@ -18,6 +18,8 @@ package clusters
 
 import (
 	"context"
+	"github.com/gravitational/teleport/lib/sshutils/sftp"
+	api "github.com/gravitational/teleport/lib/teleterm/api/protogen/golang/v1"
 
 	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/defaults"
@@ -67,4 +69,63 @@ func (c *Cluster) GetServers(ctx context.Context) ([]Server, error) {
 	}
 
 	return results, nil
+}
+
+func (c *Cluster) TransferFile(request *api.FileTransferRequest, server api.TerminalService_TransferFileServer) error {
+	proxyClient, err := c.clusterClient.ConnectToProxy(server.Context())
+	if err != nil {
+		return err
+	}
+	defer proxyClient.Close()
+
+	var config *sftp.Config
+	var configErr error
+
+	if request.GetDirection() == api.FileTransferDirection_FILE_TRANSFER_DIRECTION_DOWNLOAD {
+		config, configErr = sftp.CreateDownloadConfig(request.GetSource(), request.GetDestination(), sftp.Options{})
+	} else {
+		config, configErr = sftp.CreateUploadConfig([]string{request.GetSource()}, request.GetDestination(), sftp.Options{})
+	}
+
+	if configErr != nil {
+		return trace.Wrap(configErr)
+	}
+
+	config.ProgressWriter = &grpcProgressWriter{TransferFileServer: server}
+	config.WriteSimpleProgress = true
+
+	clusterServers, err := proxyClient.FindNodesByFilters(server.Context(), proto.ListResourcesRequest{
+		Namespace: defaults.Namespace,
+	})
+
+	var foundServer types.Server
+	for _, clusterServer := range clusterServers {
+		if clusterServer.GetName() == request.GetServerId() {
+			foundServer = clusterServer
+			break
+		}
+	}
+
+	if foundServer == nil {
+		return trace.BadParameter("Requested server does not exist")
+	}
+
+	err = c.clusterClient.TransferFiles(server.Context(), request.GetLogin(), foundServer.GetHostname()+":0", config)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	return nil
+}
+
+type grpcProgressWriter struct {
+	TransferFileServer api.TerminalService_TransferFileServer
+}
+
+func (writer *grpcProgressWriter) Write(bytes []byte) (n int, err error) {
+	err = writer.TransferFileServer.Send(&api.FileTransferProgress{Data: string(bytes)})
+	if err != nil {
+		return 0, err
+	}
+	return len(bytes), nil
 }
