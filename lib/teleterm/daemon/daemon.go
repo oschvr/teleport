@@ -19,6 +19,8 @@ import (
 	"sync"
 
 	"github.com/gravitational/teleport/lib/client/db/dbcmd"
+	api "github.com/gravitational/teleport/lib/teleterm/api/protogen/golang/v1"
+	"github.com/gravitational/teleport/lib/teleterm/api/uri"
 	"github.com/gravitational/teleport/lib/teleterm/clusters"
 	"github.com/gravitational/teleport/lib/teleterm/gateway"
 
@@ -375,6 +377,21 @@ func (s *Service) Stop() {
 	for _, gateway := range s.gateways {
 		gateway.Close()
 	}
+
+// SetTshdEventsClient allows apiserver.APIServer to provide the tshd events client after
+// daemon.Service has been created.
+//
+// The startup of the app should be orchestrated so that this method is called before any handler
+// for the Terminal service. Otherwise the Terminal service RPCs that attempt to use the tshd events
+// client will panic.
+//
+// This logic is currently orchestrated within apiserver.APIServer.New and preload.ts in the
+// Electron app.
+func (s *Service) SetTshdEventsClient(client api.TshdEventsServiceClient) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.tshdEventsClient = client
 }
 
 // Service is the daemon service
@@ -384,6 +401,11 @@ type Service struct {
 	// gateways holds the long-running gateways for resources on different clusters. So far it's been
 	// used mostly for database gateways but it has potential to be used for app access as well.
 	gateways map[string]*gateway.Gateway
+	// tshdEventsClient is provided by the APIServer and received in SetTshdEventsClient.
+	//
+	// The startup of the whole app is orchestrated in a way which lets daemon.Service assume that
+	// tshdEventsClient will be provided before any other call is made on daemon.Service.
+	tshdEventsClient api.TshdEventsServiceClient
 }
 
 type CreateGatewayParams struct {

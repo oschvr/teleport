@@ -24,6 +24,7 @@ import (
 
 	api "github.com/gravitational/teleport/lib/teleterm/api/protogen/golang/v1"
 	"github.com/gravitational/teleport/lib/teleterm/apiserver/handler"
+	"github.com/gravitational/teleport/lib/teleterm/apiserver/startuphandler"
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
@@ -77,6 +78,48 @@ func New(ctx context.Context, cfg Config) (*APIServer, error) {
 		withErrorHandling(cfg.Log),
 	))
 
+	// Create Startup service.
+
+	startupServiceHandler, err := startuphandler.New(closeContext)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	api.RegisterStartupServiceServer(grpcServer, startupServiceHandler)
+
+	// Wait for the tshd events server address and dynamically inject the client into daemon.Service.
+
+	go func() {
+		cfg.Log.Info("Waiting for tshd events server address")
+		tshdEventsServerAddress, err := startupServiceHandler.TshdEventsServerAddress(closeContext)
+		if err != nil {
+			cfg.Log.WithError(err).Error("Could not obtain tshd events server address")
+			return
+		}
+		cfg.Log.Info("tshd events server address obtained, creating a client")
+
+		tshdEventsCreds := grpc.WithInsecure()
+		if shouldUseMTLS {
+			// rendererCertPath will be read immediately when calling createClientCredentials. At this
+			// point, the renderer cert has already been used to call the startup service so we can assume
+			// that the public key of the renderer process exists under that path.
+			tshdEventsCreds, err = createClientCredentials(tshdKeyPair, rendererCertPath)
+			if err != nil {
+				cfg.Log.WithError(err).Error("Could not create tshd events client credentials")
+				return
+			}
+		}
+
+		client, err := createTshdEventsClient(closeContext, tshdEventsServerAddress, tshdEventsCreds)
+		if err != nil {
+			cfg.Log.WithError(err).Error("Could not create tshd events client")
+			return
+		}
+		cfg.Log.Info("tshd events client created")
+
+		cfg.Daemon.SetTshdEventsClient(client)
+	}()
+
 	// Create Terminal service.
 
 	serviceHandler, err := handler.New(
@@ -128,6 +171,17 @@ func newListener(hostAddr string) (net.Listener, error) {
 func sendBoundNetworkPortToStdout(addr utils.NetAddr) {
 	// Connect needs this message to know which port has been assigned to the server.
 	fmt.Printf("{CONNECT_GRPC_PORT: %v}\n", addr.Port(1))
+}
+
+func createTshdEventsClient(closeContext context.Context, addr string, creds grpc.DialOption) (api.TshdEventsServiceClient, error) {
+	conn, err := grpc.DialContext(closeContext, addr, creds)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	client := api.NewTshdEventsServiceClient(conn)
+
+	return client, nil
 }
 
 // Server is a combination of the underlying grpc.Server and its RuntimeOpts.
