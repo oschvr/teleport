@@ -3540,11 +3540,35 @@ func (tc *TeleportClient) GetNewLoginKey(ctx context.Context, keyPolicy keys.Pri
 	case keys.PrivateKeyPolicyHardwareKey, keys.PrivateKeyPolicyHardwareKeyTouch:
 		log.Debugf("Attempting to login with YubiKey generated private key.")
 
-		priv, err := keys.GetOrGenerateYubiKeyPrivateKey(ctx, keyPolicy == keys.PrivateKeyPolicyHardwareKeyTouch)
-		if err != nil {
+		touchRequired := keyPolicy == keys.PrivateKeyPolicyHardwareKeyTouch
+		priv, err := keys.GetYubiKeyPrivateKey(ctx, touchRequired)
+		switch {
+		case err == nil:
+			return priv, nil
+		case trace.IsCompareFailed(err):
+			// If we get a compare failed error, that means we found a non-Teleport certificate in the YubiKey PIV slot.
+			// The message is user readable, so we output it as, followed by a prompt to overwrite the slot.
+			fmt.Fprintln(tc.Stderr, err.Error())
+			overwrite, err := prompt.Confirmation(ctx, tc.Stderr, prompt.Stdin(), "Would you like to overwrite this certificate and it's corresponding private key?")
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+
+			if !overwrite {
+				return nil, trace.Errorf("operation canceled")
+			}
+
+			// fallthrough to generate a new private key and overwrite the slot.
+			fallthrough
+		case trace.IsNotFound(err):
+			priv, err = keys.GenerateYubiKeyPrivateKey(ctx, touchRequired)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return priv, nil
+		default:
 			return nil, trace.Wrap(err)
 		}
-		return priv, nil
 	default:
 		log.Debugf("Attempting to login with a new RSA private key.")
 

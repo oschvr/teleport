@@ -36,15 +36,15 @@ func TestGetOrGenerateYubiKeyPrivateKey(t *testing.T) {
 	resetYubikey(ctx, t)
 
 	// Generate a new YubiKeyPrivateKey.
-	priv, err := GetOrGenerateYubiKeyPrivateKey(ctx, false)
+	priv, err := GenerateYubiKeyPrivateKey(ctx, false)
 	require.NoError(t, err)
 
 	// Test creating a self signed certificate with the key.
 	_, err = selfSignedTeleportClientCertificate(priv, priv.Public())
 	require.NoError(t, err)
 
-	// Another call to GetOrGenerateYubiKeyPrivateKey should retrieve the previously generated key.
-	retrievePriv, err := GetOrGenerateYubiKeyPrivateKey(ctx, false)
+	// Another call to GetYubiKeyPrivateKey should retrieve the previously generated key.
+	retrievePriv, err := GetYubiKeyPrivateKey(ctx, false)
 	require.NoError(t, err)
 	require.Equal(t, priv, retrievePriv)
 
