@@ -179,7 +179,7 @@ func (s *SessionRegistry) Close() {
 	s.log.Debug("Closing Session Registry.")
 }
 
-func (s *SessionRegistry) tryCreateHostUser(ctx *ServerContext) (*user.User, error) {
+func (s *SessionRegistry) TryCreateHostUser(ctx *ServerContext) (*user.User, error) {
 	if !ctx.srv.GetCreateHostUser() || s.users == nil {
 		return nil, nil // not an error to not be able to create a host user
 	}
@@ -255,7 +255,7 @@ func (s *SessionRegistry) OpenSession(ctx context.Context, ch ssh.Channel, scx *
 	s.addSession(sess)
 	scx.Infof("Creating (interactive) session %v.", sid)
 
-	tempUser, err := s.tryCreateHostUser(scx)
+	tempUser, err := s.TryCreateHostUser(scx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -295,7 +295,7 @@ func (s *SessionRegistry) OpenExecSession(ctx context.Context, channel ssh.Chann
 	// occurs, otherwise it will be closed by the callee.
 	scx.setSession(sess)
 
-	tempUser, err := s.tryCreateHostUser(scx)
+	tempUser, err := s.TryCreateHostUser(scx)
 	if err != nil {
 		return trace.Wrap(err)
 	}

@@ -1003,11 +1003,19 @@ func (s *Server) getServerResource() (types.Resource, error) {
 
 // serveAgent will build the a sock path for this user and serve an SSH agent on unix socket.
 func (s *Server) serveAgent(ctx *srv.ServerContext) error {
+	// create the temporary user early if they are using agent
+	// forwarding otherwise the agent socket cant be created
+	systemUser, err := s.termHandlers.SessionRegistry.TryCreateHostUser(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
 	// gather information about user and process. this will be used to set the
 	// socket path and permissions
-	systemUser, err := user.Lookup(ctx.Identity.Login)
-	if err != nil {
-		return trace.ConvertSystemError(err)
+	if systemUser == nil {
+		systemUser, err = user.Lookup(ctx.Identity.Login)
+		if err != nil {
+			return trace.ConvertSystemError(err)
+		}
 	}
 
 	pid := os.Getpid()
