@@ -211,15 +211,12 @@ func (f PNGFrame) Encode() ([]byte, error) {
 	}
 
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.BigEndian, header{
-		Type:   byte(TypePNGFrame),
-		Left:   uint32(f.Img.Bounds().Min.X),
-		Top:    uint32(f.Img.Bounds().Min.Y),
-		Right:  uint32(f.Img.Bounds().Max.X),
-		Bottom: uint32(f.Img.Bounds().Max.Y),
-	}); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	buf.WriteByte(byte(TypePNGFrame))
+	writeUint32(buf, uint32(f.Img.Bounds().Min.X))
+	writeUint32(buf, uint32(f.Img.Bounds().Min.Y))
+	writeUint32(buf, uint32(f.Img.Bounds().Max.X))
+	writeUint32(buf, uint32(f.Img.Bounds().Max.Y))
+
 	encoder := f.enc
 	if encoder == nil {
 		encoder = &png.Encoder{}
@@ -285,27 +282,17 @@ func decodePNG2Frame(in peekReader) (PNG2Frame, error) {
 }
 
 func (f PNG2Frame) Encode() ([]byte, error) {
-	type header struct {
-		Left, Top     uint32
-		Right, Bottom uint32
-	}
-
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypePNG2Frame))
 
 	// write 0 as a placeholder length for now
-	if err := binary.Write(buf, binary.BigEndian, uint32(0)); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, uint32(0))
 
-	if err := binary.Write(buf, binary.BigEndian, header{
-		Left:   uint32(f.Img.Bounds().Min.X),
-		Top:    uint32(f.Img.Bounds().Min.Y),
-		Right:  uint32(f.Img.Bounds().Max.X),
-		Bottom: uint32(f.Img.Bounds().Max.Y),
-	}); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, uint32(f.Img.Bounds().Min.X))
+	writeUint32(buf, uint32(f.Img.Bounds().Min.Y))
+	writeUint32(buf, uint32(f.Img.Bounds().Max.X))
+	writeUint32(buf, uint32(f.Img.Bounds().Max.Y))
+
 	encoder := f.enc
 	if encoder == nil {
 		encoder = &png.Encoder{}
@@ -316,11 +303,13 @@ func (f PNG2Frame) Encode() ([]byte, error) {
 	}
 	after := buf.Len()
 
+	result := buf.Bytes()
+
 	// fill in the length
 	pngLen := after - before
-	binary.Write(bytes.NewBuffer(buf.Bytes()[:4]), binary.BigEndian, uint32(pngLen))
+	binary.BigEndian.PutUint32(result[1:5], uint32(pngLen))
 
-	return buf.Bytes(), nil
+	return result, nil
 }
 
 // MouseMove is the mouse movement message.
@@ -332,9 +321,8 @@ type MouseMove struct {
 func (m MouseMove) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeMouseMove))
-	if err := binary.Write(buf, binary.BigEndian, m); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, m.X)
+	writeUint32(buf, m.Y)
 	return buf.Bytes(), nil
 }
 
@@ -388,9 +376,8 @@ type KeyboardButton struct {
 func (k KeyboardButton) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeKeyboardButton))
-	if err := binary.Write(buf, binary.BigEndian, k); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, k.KeyCode)
+	buf.WriteByte(byte(k.State))
 	return buf.Bytes(), nil
 }
 
@@ -410,9 +397,8 @@ type ClientScreenSpec struct {
 func (s ClientScreenSpec) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeClientScreenSpec))
-	if err := binary.Write(buf, binary.BigEndian, s); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, s.Width)
+	writeUint32(buf, s.Height)
 	return buf.Bytes(), nil
 }
 
@@ -520,7 +506,7 @@ type ClipboardData []byte
 func (c ClipboardData) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeClipboardData))
-	binary.Write(buf, binary.BigEndian, uint32(len(c)))
+	writeUint32(buf, uint32(len(c)))
 	buf.Write(c)
 	return buf.Bytes(), nil
 }
@@ -585,7 +571,7 @@ func (m MFA) Encode() ([]byte, error) {
 	if len(buff) > maxMFADataLength {
 		return nil, trace.BadParameter("mfa challenge data exceeds maximum length")
 	}
-	binary.Write(buf, binary.BigEndian, uint32(len(buff)))
+	writeUint32(buf, uint32(len(buff)))
 	buf.Write(buff)
 	return buf.Bytes(), nil
 }
@@ -679,7 +665,7 @@ type SharedDirectoryAnnounce struct {
 func (s SharedDirectoryAnnounce) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryAnnounce))
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.DirectoryID)
 	if err := encodeString(buf, s.Name); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -721,8 +707,8 @@ func decodeSharedDirectoryAcknowledge(in peekReader) (SharedDirectoryAcknowledge
 func (s SharedDirectoryAcknowledge) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryAcknowledge))
-	binary.Write(buf, binary.BigEndian, s.ErrCode)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.ErrCode)
+	writeUint32(buf, s.DirectoryID)
 	return buf.Bytes(), nil
 }
 
@@ -735,8 +721,8 @@ type SharedDirectoryInfoRequest struct {
 func (s SharedDirectoryInfoRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryInfoRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
 	if err := encodeString(buf, s.Path); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -774,13 +760,13 @@ type SharedDirectoryInfoResponse struct {
 func (s SharedDirectoryInfoResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryInfoResponse))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.ErrCode)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
 	fso, err := s.Fso.Encode()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	binary.Write(buf, binary.BigEndian, fso)
+	buf.Write(fso)
 	return buf.Bytes(), nil
 }
 
@@ -818,9 +804,9 @@ type FileSystemObject struct {
 
 func (f FileSystemObject) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, f.LastModified)
-	binary.Write(buf, binary.BigEndian, f.Size)
-	binary.Write(buf, binary.BigEndian, f.FileType)
+	writeUint64(buf, f.LastModified)
+	writeUint64(buf, f.Size)
+	writeUint32(buf, f.FileType)
 	buf.WriteByte(f.IsEmpty)
 	if err := encodeString(buf, f.Path); err != nil {
 		return nil, trace.Wrap(err)
@@ -872,9 +858,9 @@ type SharedDirectoryCreateRequest struct {
 func (s SharedDirectoryCreateRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryCreateRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
-	binary.Write(buf, binary.BigEndian, s.FileType)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
+	writeUint32(buf, s.FileType)
 	if err := encodeString(buf, s.Path); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -919,8 +905,8 @@ type SharedDirectoryCreateResponse struct {
 func (s SharedDirectoryCreateResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryCreateResponse))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.ErrCode)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
 	fsoEnc, err := s.Fso.Encode()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -961,8 +947,8 @@ type SharedDirectoryDeleteRequest struct {
 func (s SharedDirectoryDeleteRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryDeleteRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
 	if err := encodeString(buf, s.Path); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1000,7 +986,8 @@ type SharedDirectoryDeleteResponse struct {
 func (s SharedDirectoryDeleteResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryDeleteResponse))
-	binary.Write(buf, binary.BigEndian, s)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
 	return buf.Bytes(), nil
 }
 
@@ -1019,8 +1006,8 @@ type SharedDirectoryListRequest struct {
 func (s SharedDirectoryListRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryListRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
 	if err := encodeString(buf, s.Path); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1060,9 +1047,10 @@ type SharedDirectoryListResponse struct {
 func (s SharedDirectoryListResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryListResponse))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.ErrCode)
-	binary.Write(buf, binary.BigEndian, uint32(len(s.FsoList)))
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
+	writeUint32(buf, uint32(len(s.FsoList)))
+
 	for _, fso := range s.FsoList {
 		fsoEnc, err := fso.Encode()
 		if err != nil {
@@ -1117,16 +1105,14 @@ type SharedDirectoryReadRequest struct {
 
 func (s SharedDirectoryReadRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
-
 	buf.WriteByte(byte(TypeSharedDirectoryReadRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
 	if err := encodeString(buf, s.Path); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	binary.Write(buf, binary.BigEndian, s.Offset)
-	binary.Write(buf, binary.BigEndian, s.Length)
-
+	writeUint64(buf, s.Offset)
+	writeUint32(buf, s.Length)
 	return buf.Bytes(), nil
 }
 
@@ -1180,12 +1166,10 @@ type SharedDirectoryReadResponse struct {
 func (s SharedDirectoryReadResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryReadResponse))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.ErrCode)
-	binary.Write(buf, binary.BigEndian, s.ReadDataLength)
-	if _, err := buf.Write(s.ReadData); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
+	writeUint32(buf, s.ReadDataLength)
+	buf.Write(s.ReadData)
 	return buf.Bytes(), nil
 }
 
@@ -1235,18 +1219,15 @@ func (s SharedDirectoryWriteRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	buf.WriteByte(byte(TypeSharedDirectoryWriteRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
-	binary.Write(buf, binary.BigEndian, s.Offset)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
+	writeUint64(buf, s.Offset)
 	if err := encodeString(buf, s.Path); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	binary.Write(buf, binary.BigEndian, s.WriteDataLength)
-	if _, err := buf.Write(s.WriteData); err != nil {
-		return nil, trace.Wrap(err)
-	}
+	writeUint32(buf, s.WriteDataLength)
+	buf.Write(s.WriteData)
 	return buf.Bytes(), nil
-
 }
 
 func decodeSharedDirectoryWriteRequest(in peekReader) (SharedDirectoryWriteRequest, error) {
@@ -1305,7 +1286,9 @@ type SharedDirectoryWriteResponse struct {
 func (s SharedDirectoryWriteResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryWriteResponse))
-	binary.Write(buf, binary.BigEndian, s)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
+	writeUint32(buf, s.BytesWritten)
 	return buf.Bytes(), nil
 }
 
@@ -1327,8 +1310,8 @@ type SharedDirectoryMoveRequest struct {
 func (s SharedDirectoryMoveRequest) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryMoveRequest))
-	binary.Write(buf, binary.BigEndian, s.CompletionID)
-	binary.Write(buf, binary.BigEndian, s.DirectoryID)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.DirectoryID)
 	if err := encodeString(buf, s.OriginalPath); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1372,7 +1355,8 @@ type SharedDirectoryMoveResponse struct {
 func (s SharedDirectoryMoveResponse) Encode() ([]byte, error) {
 	buf := new(bytes.Buffer)
 	buf.WriteByte(byte(TypeSharedDirectoryMoveResponse))
-	binary.Write(buf, binary.BigEndian, s)
+	writeUint32(buf, s.CompletionID)
+	writeUint32(buf, s.ErrCode)
 	return buf.Bytes(), nil
 }
 
@@ -1417,3 +1401,29 @@ func decodeString(r io.Reader, maxLen uint32) (string, error) {
 type rawMsg []byte
 
 func (r rawMsg) Encode() ([]byte, error) { return []byte(r), nil }
+
+// writeUint16 writes v to b in big endian order
+func writeUint16(b *bytes.Buffer, v uint16) {
+	b.WriteByte(byte(v >> 8))
+	b.WriteByte(byte(v))
+}
+
+// writeUint32 writes v to b in big endian order
+func writeUint32(b *bytes.Buffer, v uint32) {
+	b.WriteByte(byte(v >> 24))
+	b.WriteByte(byte(v >> 16))
+	b.WriteByte(byte(v >> 8))
+	b.WriteByte(byte(v))
+}
+
+// writeUint64 writes v to b in big endian order
+func writeUint64(b *bytes.Buffer, v uint64) {
+	b.WriteByte(byte(v >> 56))
+	b.WriteByte(byte(v >> 48))
+	b.WriteByte(byte(v >> 40))
+	b.WriteByte(byte(v >> 32))
+	b.WriteByte(byte(v >> 24))
+	b.WriteByte(byte(v >> 16))
+	b.WriteByte(byte(v >> 8))
+	b.WriteByte(byte(v))
+}
