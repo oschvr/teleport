@@ -347,6 +347,7 @@ require (
 )
 
 replace (
+	golang.org/x/crypto => github.com/gravitational/crypto v0.0.0-20220925030905-69ba99298ac8
 	github.com/coreos/go-oidc => github.com/gravitational/go-oidc v0.0.6
 	github.com/denisenkom/go-mssqldb => github.com/gravitational/go-mssqldb v0.11.1-0.20220509084309-3d41480ef74f
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible => github.com/golang-jwt/jwt v3.2.1+incompatible
