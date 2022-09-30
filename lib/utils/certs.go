@@ -19,6 +19,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -283,6 +284,18 @@ func NewCertPoolFromPath(path string) (*x509.CertPool, error) {
 		pool.AddCert(ca)
 	}
 	return pool, nil
+}
+
+// GetTLSCertExpireTime returns the certificate NotAfter time.
+func GetTLSCertExpireTime(cert tls.Certificate) (time.Time, error) {
+	if len(cert.Certificate) < 1 {
+		return time.Time{}, trace.NotFound("invalid certificate length")
+	}
+	x509cert, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return time.Time{}, trace.Wrap(err)
+	}
+	return x509cert.NotAfter, nil
 }
 
 const pemBlockCertificate = "CERTIFICATE"

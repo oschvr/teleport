@@ -20,9 +20,12 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/gravitational/trace"
@@ -34,9 +37,17 @@ import (
 	"github.com/gravitational/teleport/lib/utils/aws"
 )
 
+// TODO(gavin): doc
+type ConnectionMiddleware interface {
+	// OnNewConnection is a callback triggered when a new downstream connection is
+	// accepted by the local proxy.
+	OnNewConnection(ctx context.Context, lp *LocalProxy, conn net.Conn) error
+}
+
 // LocalProxy allows upgrading incoming connection to TLS where custom TLS values are set SNI ALPN and
 // updated connection is forwarded to remote ALPN SNI teleport proxy service.
 type LocalProxy struct {
+	*sync.Mutex
 	cfg     LocalProxyConfig
 	context context.Context
 	cancel  context.CancelFunc
@@ -72,6 +83,8 @@ type LocalProxyConfig struct {
 	RootCAs *x509.CertPool
 	// ALPNConnUpgradeRequired specifies if ALPN connection upgrade is required.
 	ALPNConnUpgradeRequired bool
+	// TODO(gavin): doc
+	ConnInterceptor ConnectionMiddleware
 }
 
 // CheckAndSetDefaults verifies the constraints for LocalProxyConfig.
@@ -109,6 +122,7 @@ func NewLocalProxy(cfg LocalProxyConfig) (*LocalProxy, error) {
 		cfg:     cfg,
 		context: ctx,
 		cancel:  cancel,
+		Mutex:   &sync.Mutex{},
 	}, nil
 }
 
@@ -129,7 +143,15 @@ func (l *LocalProxy) Start(ctx context.Context) error {
 			log.WithError(err).Errorf("Failed to accept client connection.")
 			return trace.Wrap(err)
 		}
+
 		go func() {
+			if l.cfg.ConnInterceptor != nil {
+				if err := l.cfg.ConnInterceptor.OnNewConnection(ctx, l, conn); err != nil {
+					fmt.Println("HERE: err with onconn callback: ", err)
+					log.WithError(err).Errorf("Failed to handle connection.")
+					return
+				}
+			}
 			if err := l.handleDownstreamConnection(ctx, conn); err != nil {
 				if utils.IsOKNetworkError(err) {
 					return
@@ -156,7 +178,7 @@ func (l *LocalProxy) handleDownstreamConnection(ctx context.Context, downstreamC
 			NextProtos:         l.cfg.GetProtocols(),
 			InsecureSkipVerify: l.cfg.InsecureSkipVerify,
 			ServerName:         l.cfg.SNI,
-			Certificates:       l.cfg.Certs,
+			Certificates:       l.GetCerts(),
 			RootCAs:            l.cfg.RootCAs,
 		},
 	})
@@ -191,7 +213,7 @@ func (l *LocalProxy) StartAWSAccessProxy(ctx context.Context) error {
 			NextProtos:         l.cfg.GetProtocols(),
 			InsecureSkipVerify: l.cfg.InsecureSkipVerify,
 			ServerName:         l.cfg.SNI,
-			Certificates:       l.cfg.Certs,
+			Certificates:       l.GetCerts(),
 		},
 	}
 	proxy := &httputil.ReverseProxy{
@@ -220,4 +242,37 @@ func (l *LocalProxy) StartAWSAccessProxy(ctx context.Context) error {
 		return trace.Wrap(err)
 	}
 	return nil
+}
+
+func (lp *LocalProxy) NeedDBRelogin(ctx context.Context) (bool, error) {
+	certs := lp.GetCerts()
+	if len(certs) == 0 {
+		fmt.Println("HERE: no certs configured, we need to relogin")
+		return true, nil
+	}
+	expiresAt, err := utils.GetTLSCertExpireTime(certs[0])
+	if err != nil {
+		return false, trace.Wrap(err)
+	}
+	fmt.Println("HERE: leaf cert expire time: ", expiresAt)
+	fmt.Println("HERE: time now: ", time.Now().UTC())
+	// TODO(gavin): refactor to just return this instead of the if block
+	if time.Now().After(expiresAt) {
+		fmt.Println("HERE: cert is expired, so we should relog")
+		return true, nil
+	}
+	return false, nil
+}
+
+func (l *LocalProxy) GetCerts() []tls.Certificate {
+	l.Lock()
+	defer l.Unlock()
+	return l.cfg.Certs
+}
+
+func (l *LocalProxy) SetCerts(certs []tls.Certificate) {
+	l.Lock()
+	defer l.Unlock()
+	fmt.Println("HERE: updating local proxy certs")
+	l.cfg.Certs = certs
 }

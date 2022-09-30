@@ -381,7 +381,7 @@ func generateAppSelfSignedCA(profile *client.ProfileStatus, tc *client.TeleportC
 		return trace.Wrap(err)
 	}
 
-	appCertsExpireAt, err := getTLSCertExpireTime(appCerts)
+	appCertsExpireAt, err := utils.GetTLSCertExpireTime(appCerts)
 	if err != nil {
 		return trace.Wrap(err)
 	}

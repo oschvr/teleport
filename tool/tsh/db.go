@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/teleport/api/utils/keys"
 	"github.com/gravitational/teleport/lib/client"
 	dbprofile "github.com/gravitational/teleport/lib/client/db"
 	"github.com/gravitational/teleport/lib/client/db/dbcmd"
@@ -277,16 +279,8 @@ func onDatabaseLogin(cf *CLIConf) error {
 
 func databaseLogin(cf *CLIConf, tc *client.TeleportClient, db tlsca.RouteToDatabase) error {
 	log.Debugf("Fetching database access certificate for %s on cluster %v.", db, tc.SiteName)
-	// When generating certificate for MongoDB access, database username must
-	// be encoded into it. This is required to be able to tell which database
-	// user to authenticate the connection as.
-	if db.Protocol == defaults.ProtocolMongoDB && db.Username == "" {
-		return trace.BadParameter("please provide the database user name using --db-user flag")
-	}
-	if db.Protocol == defaults.ProtocolRedis && db.Username == "" {
-		// Default to "default" in the same way as Redis does. We need the username to check access on our side.
-		// ref: https://redis.io/commands/auth
-		db.Username = defaults.DefaultRedisUsername
+	if err := db.CheckAndSetDefaults(); err != nil {
+		return trace.Wrap(err)
 	}
 
 	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy, cf.IdentityFileIn)
@@ -640,12 +634,13 @@ type localProxyConfig struct {
 
 // prepareLocalProxyOptions created localProxyOpts needed to create local proxy from localProxyConfig.
 func prepareLocalProxyOptions(arg *localProxyConfig) (localProxyOpts, error) {
-	// If user requested no client auth, open an authenticated tunnel using
-	// client cert/key of the database.
 	certFile := arg.cliConf.LocalProxyCertFile
 	keyFile := arg.cliConf.LocalProxyKeyFile
-	if certFile == "" && arg.localProxyTunnel {
-		certFile = arg.profile.DatabaseCertPathForCluster(arg.cliConf.SiteName, arg.routeToDatabase.ServiceName)
+	// For SQL Server connections, local proxy must be configured with the
+	// client certificate that will be used to route connections.
+	// If opening an authenticated tunnel, we will get the cert at connection time from the local agent instead.
+	if !arg.localProxyTunnel && arg.routeToDatabase.Protocol == defaults.ProtocolSQLServer {
+		certFile = arg.profile.DatabaseCertPathForCluster(arg.teleportClient.SiteName, arg.routeToDatabase.ServiceName)
 		keyFile = arg.profile.KeyPath()
 	}
 
@@ -669,11 +664,12 @@ func prepareLocalProxyOptions(arg *localProxyConfig) (localProxyOpts, error) {
 		opts.rootCAs = profileCAs
 	}
 
-	// For SQL Server connections, local proxy must be configured with the
-	// client certificate that will be used to route connections.
-	if arg.routeToDatabase.Protocol == defaults.ProtocolSQLServer {
-		opts.certFile = arg.profile.DatabaseCertPathForCluster(arg.teleportClient.SiteName, arg.routeToDatabase.ServiceName)
-		opts.keyFile = arg.profile.KeyPath()
+	if arg.localProxyTunnel {
+		cf := arg.cliConf
+		tc := arg.teleportClient
+		dbRoute := arg.routeToDatabase
+		opts.connMiddleware = NewDBCertChecker(cf, tc, *dbRoute)
+		fmt.Println("HERE: adding db cert checker to local proxy")
 	}
 
 	// To set correct MySQL server version DB proxy needs additional protocol.
@@ -693,6 +689,71 @@ func prepareLocalProxyOptions(arg *localProxyConfig) (localProxyOpts, error) {
 	}
 
 	return opts, nil
+}
+
+type DBCertChecker struct {
+	cf      *CLIConf
+	tc      *client.TeleportClient
+	dbRoute tlsca.RouteToDatabase
+	cluster string
+}
+
+var _ alpnproxy.ConnectionMiddleware = (*DBCertChecker)(nil)
+
+func NewDBCertChecker(cf *CLIConf, tc *client.TeleportClient, dbRoute tlsca.RouteToDatabase) alpnproxy.ConnectionMiddleware {
+	cluster := tc.SiteName
+	return &DBCertChecker{
+		cf:      cf,
+		tc:      tc,
+		dbRoute: dbRoute,
+		cluster: cluster,
+	}
+}
+
+func (c *DBCertChecker) OnNewConnection(ctx context.Context, lp *alpnproxy.LocalProxy, conn net.Conn) error {
+	if err := c.dbRoute.CheckAndSetDefaults(); err != nil {
+		return trace.Wrap(err)
+	}
+
+	fmt.Println("HERE: on new conn called")
+	if needDBLogin, err := lp.NeedDBRelogin(ctx); err != nil {
+		return trace.Wrap(err)
+	} else if !needDBLogin {
+		fmt.Println("HERE: we dont need to relog in onNewConnection")
+		return nil
+	}
+
+	profile, err := client.StatusCurrent(c.cf.HomePath, c.cf.Proxy, c.cf.IdentityFileIn)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	var key *client.Key
+	if err = client.RetryWithRelogin(c.cf.Context, c.tc, func() error {
+		key, err = c.tc.IssueUserCertsWithMFA(c.cf.Context, client.ReissueParams{
+			RouteToCluster: c.tc.SiteName,
+			RouteToDatabase: proto.RouteToDatabase{
+				ServiceName: c.dbRoute.ServiceName,
+				Protocol:    c.dbRoute.Protocol,
+				Username:    c.dbRoute.Username,
+				Database:    c.dbRoute.Database,
+			},
+			AccessRequests: profile.ActiveRequests.AccessRequests,
+		})
+		return trace.Wrap(err)
+	}); err != nil {
+		return trace.Wrap(err)
+	}
+
+	dbCert, ok := key.DBTLSCerts[c.dbRoute.ServiceName]
+	if !ok {
+		return trace.NotFound("database '%v' TLS cert missing", c.dbRoute.ServiceName)
+	}
+	tlsCert, err := keys.X509KeyPair(dbCert, key.PrivateKeyPEM())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	lp.SetCerts([]tls.Certificate{tlsCert})
+	return nil
 }
 
 // mySQLVersionToProto returns base64 encoded MySQL server version with MySQL protocol prefix.
@@ -863,15 +924,11 @@ func dbInfoHasChanged(cf *CLIConf, certPath string) (bool, error) {
 		return false, nil
 	}
 
-	buff, err := os.ReadFile(certPath)
+	certChain, err := utils.ReadCertificatesFromPath(certPath)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}
-	cert, err := tlsca.ParseCertificatePEM(buff)
-	if err != nil {
-		return false, trace.Wrap(err)
-	}
-	identity, err := tlsca.FromSubject(cert.Subject, cert.NotAfter)
+	identity, err := tlsca.FromSubject(certChain[0].Subject, certChain[0].NotAfter)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}

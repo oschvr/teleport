@@ -488,6 +488,7 @@ type localProxyOpts struct {
 	keyFile                 string
 	rootCAs                 *x509.CertPool
 	alpnConnUpgradeRequired bool
+	connMiddleware          alpnproxy.ConnectionMiddleware
 }
 
 // protocol returns the first protocol or string if configuration doesn't contain any protocols.
@@ -527,6 +528,7 @@ func mkLocalProxy(ctx context.Context, opts localProxyOpts) (*alpnproxy.LocalPro
 		Certs:                   certs,
 		RootCAs:                 opts.rootCAs,
 		ALPNConnUpgradeRequired: opts.alpnConnUpgradeRequired,
+		ConnInterceptor:         opts.connMiddleware,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -676,7 +678,7 @@ func loadAppCertificate(tc *libclient.TeleportClient, appName string) (tls.Certi
 		return tls.Certificate{}, trace.Wrap(err)
 	}
 
-	expiresAt, err := getTLSCertExpireTime(tlsCert)
+	expiresAt, err := utils.GetTLSCertExpireTime(tlsCert)
 	if err != nil {
 		return tls.Certificate{}, trace.WrapWithMessage(err, "invalid certificate - please login to the application again. 'tsh app login'")
 	}
@@ -686,18 +688,6 @@ func loadAppCertificate(tc *libclient.TeleportClient, appName string) (tls.Certi
 			appName)
 	}
 	return tlsCert, nil
-}
-
-// getTLSCertExpireTime returns the certificate NotAfter time.
-func getTLSCertExpireTime(cert tls.Certificate) (time.Time, error) {
-	if len(cert.Certificate) < 1 {
-		return time.Time{}, trace.NotFound("invalid certificate length")
-	}
-	x509cert, err := x509.ParseCertificate(cert.Certificate[0])
-	if err != nil {
-		return time.Time{}, trace.Wrap(err)
-	}
-	return x509cert.NotAfter, nil
 }
 
 // dbProxyTpl is the message that gets printed to a user when a database proxy is started.
