@@ -22,6 +22,8 @@ import (
 	"reflect"
 	"unicode"
 
+	"github.com/gogo/protobuf/jsonpb"
+	"github.com/gogo/protobuf/proto"
 	"github.com/gravitational/trace"
 	jsoniter "github.com/json-iterator/go"
 
@@ -183,4 +185,21 @@ func ReadYAML(reader io.Reader) (interface{}, error) {
 		}
 		values = append(values, val)
 	}
+}
+
+// UnmarshalProtoJSON unmarshals the given JSON into a Proto message.
+func UnmarshalProtoJSON(data []byte, val proto.Message) error {
+	if err := jsonpb.Unmarshal(bytes.NewReader(data), val); err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
+// MarshalProtoJSON marshals the given Proto message into JSON.
+func MarshalProtoJSON(val proto.Message) ([]byte, error) {
+	valueBuf := new(bytes.Buffer)
+	if err := (&jsonpb.Marshaler{}).Marshal(valueBuf, val); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return valueBuf.Bytes(), nil
 }

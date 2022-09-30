@@ -33,6 +33,7 @@ import (
 	"github.com/gravitational/teleport/lib/backend"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/services"
+	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
@@ -991,9 +992,10 @@ func (s *IdentityService) CreateOIDCAuthRequest(ctx context.Context, req types.O
 	if err := req.Check(); err != nil {
 		return trace.Wrap(err)
 	}
-	value, err := json.Marshal(req)
+	value, err := utils.MarshalProtoJSON(&req)
 	if err != nil {
 		return trace.Wrap(err)
+
 	}
 	item := backend.Item{
 		Key:     backend.Key(webPrefix, connectorsPrefix, oidcPrefix, requestsPrefix, req.StateToken),
@@ -1016,11 +1018,11 @@ func (s *IdentityService) GetOIDCAuthRequest(ctx context.Context, stateToken str
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	var req types.OIDCAuthRequest
-	if err := json.Unmarshal(item.Value, &req); err != nil {
+	req := new(types.OIDCAuthRequest)
+	if err := utils.UnmarshalProtoJSON(item.Value, req); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return &req, nil
+	return req, nil
 }
 
 // UpsertSAMLConnector upserts SAML Connector
@@ -1113,9 +1115,10 @@ func (s *IdentityService) CreateSAMLAuthRequest(ctx context.Context, req types.S
 	if err := req.Check(); err != nil {
 		return trace.Wrap(err)
 	}
-	value, err := json.Marshal(req)
+	value, err := utils.MarshalProtoJSON(&req)
 	if err != nil {
 		return trace.Wrap(err)
+
 	}
 	item := backend.Item{
 		Key:     backend.Key(webPrefix, connectorsPrefix, samlPrefix, requestsPrefix, req.ID),
@@ -1138,11 +1141,11 @@ func (s *IdentityService) GetSAMLAuthRequest(ctx context.Context, id string) (*t
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	var req types.SAMLAuthRequest
-	if err := json.Unmarshal(item.Value, &req); err != nil {
+	req := new(types.SAMLAuthRequest)
+	if err := utils.UnmarshalProtoJSON(item.Value, req); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return &req, nil
+	return req, nil
 }
 
 // CreateSSODiagnosticInfo creates new SAML diagnostic info record.
@@ -1280,7 +1283,7 @@ func (s *IdentityService) CreateGithubAuthRequest(ctx context.Context, req types
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	value, err := json.Marshal(req)
+	value, err := utils.MarshalProtoJSON(&req)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1305,12 +1308,11 @@ func (s *IdentityService) GetGithubAuthRequest(ctx context.Context, stateToken s
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	var req types.GithubAuthRequest
-	err = json.Unmarshal(item.Value, &req)
-	if err != nil {
+	req := new(types.GithubAuthRequest)
+	if err := utils.UnmarshalProtoJSON(item.Value, req); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return &req, nil
+	return req, nil
 }
 
 // GetRecoveryCodes returns user's recovery codes.
